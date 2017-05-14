@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using TestCancellation.Commands;
 
@@ -10,7 +11,7 @@ namespace TestCancellation.ViewModel
     /// </summary>
     public class MainPageViewModel : INotifyPropertyChanged
     {
-        private string _InfoMessage;
+        private string _InfoMessage = string.Empty;
         /// <summary>Information to display to the user</summary>
         public string InfoMessage
         {
@@ -22,7 +23,10 @@ namespace TestCancellation.ViewModel
         }
 
         /// <summary>Boolean indicating whether the main button has been pressed and the task is running</summary>
-        private bool IsProcessing;
+        private bool _IsProcessing = false;
+
+        /// <summary>Cancellation token source</summary>
+        private CancellationTokenSource _MainTaskTokenSource = null;
 
         /// <summary>Command associated with the main button</summary>
         public Command MainClickCommand { get; set; }
@@ -35,13 +39,15 @@ namespace TestCancellation.ViewModel
         /// </summary>
         public MainPageViewModel()
         {
+            this._MainTaskTokenSource = new CancellationTokenSource();
+
             this.MainClickCommand = new Command(this.MainClick, this.CanMainClick);
 
             this.CancelCommand = new Command(this.CancelClick, this.CanCancelClick);
 
             this.InfoMessage = "initialised";
 
-            this.IsProcessing = false;
+            this._IsProcessing = false;
         }
 
         #region actions
@@ -52,17 +58,30 @@ namespace TestCancellation.ViewModel
         {
             this.InfoMessage = "The main button was clicked";
 
-            this.IsProcessing = true;
+            this._IsProcessing = true;
 
             for (int i = 0; i < 10; i++)
             {
-                this.InfoMessage = "i: " + i;
+                if (this._MainTaskTokenSource.Token.IsCancellationRequested)
+                {
+                    // If a cancellation has been requested, we inform the user
+                    // and abort the process
+                    this.InfoMessage = $"Cancelled before processing i: {i}";
+                    this._IsProcessing = false;
+
+                    // Just before aborting, the source is regenerated
+                    this._MainTaskTokenSource.Dispose();
+                    this._MainTaskTokenSource = new CancellationTokenSource();
+                    return;
+                }
+
+                this.InfoMessage = $"i: {i}";
                 await Task.Delay(1000);
             }
 
             this.InfoMessage = "Processing done";
 
-            this.IsProcessing = false;
+            this._IsProcessing = false;
 
             this.CheckCommands();
         }
@@ -72,8 +91,13 @@ namespace TestCancellation.ViewModel
         /// </summary>
         private void CancelClick()
         {
+            this._MainTaskTokenSource.Cancel();
+
+            // The processing is stopped; this automatically disabled the cancel button,
+            // so that the user can only click it once
+            this._IsProcessing = false;
+
             this.InfoMessage = "A cancellation has been requested";
-            // TODO: implement the cancellation
         }
 
         /// <summary>
@@ -93,7 +117,7 @@ namespace TestCancellation.ViewModel
         /// <returns>true if that's the case, false otherwise</returns>
         private bool CanMainClick()
         {
-            return !this.IsProcessing;
+            return !this._IsProcessing;
         }
 
         /// <summary>
@@ -102,7 +126,7 @@ namespace TestCancellation.ViewModel
         /// <returns>true if that's the case, false otherwise</returns>
         private bool CanCancelClick()
         {
-            return this.IsProcessing;
+            return this._IsProcessing;
         }
         #endregion controls
 
